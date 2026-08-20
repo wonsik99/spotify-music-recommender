@@ -217,21 +217,28 @@ server <- function(input, output, session) {
   output$radarCharts = renderPlot({
     req(input$resultSelect)
     used_colors = c("red", "lightgreen", "darkgrey", "lightskyblue")
-    compared = result_rv() |> select(-track_genre, key, duration_ms, explicit,
-                                     time_signature)
-    #str_split_i(resultInput, " - ", 1))
-    user_input = user_input_rv() |> select(-track_genre, key, duration_ms, explicit,
-                                           time_signature)
-    compared = rbind(compared, user_input)
-    maxes = apply(compared, 2, max)
-    maxrow = as.data.frame(t(maxes))
-    mins = apply(compared, 2, min)
-    minrow = as.data.frame(t(mins))
+    radar_vars = c("popularity", "danceability", "energy", "loudness",
+                   "acousticness", "valence", "tempo")
+
+    # ungroup(): track_attr is grouped by track_id, and select() on a
+    # grouped_df always keeps the grouping column -- which would add a
+    # meaningless track_id axis to the radar.
+    compared = rbind(result_rv(), user_input_rv()) |>
+      ungroup() |>
+      select(track_name, all_of(radar_vars))
+
+    # Axis max/min must come from numeric columns only. apply() pushes the
+    # frame through as.matrix(), which coerces everything to character when
+    # any column is character, making max/min a lexicographic comparison.
+    # loudness is negative for most tracks, so its axis rendered inverted:
+    # quiet songs plotted as loud.
+    num = compared |> select(-track_name)
+    maxrow = as.data.frame(t(apply(num, 2, max)))
+    minrow = as.data.frame(t(apply(num, 2, min)))
     max_min = rbind(maxrow, minrow)
-    #rownames(max_min) = c("Max", "Min")
     max_min$track_name = c("Max", "Min")
-    compared = rbind(max_min, compared) |> select(track_name, popularity, danceability, energy, 
-                                                  loudness,  acousticness, valence, tempo) |>
+
+    compared = rbind(max_min[, names(compared)], compared) |>
       mutate(across(-track_name, as.numeric)) |> column_to_rownames("track_name")
     radarchart(compared, pcol = used_colors)
     legend("bottomleft", legend = rownames(compared[-c(1, 2),]),
@@ -262,7 +269,9 @@ server <- function(input, output, session) {
     df = result_rv()
     numkey = c("C", "C#", "D", "D#", "E", "F", "F#", "G", 
             "G#", "A", "A#", "B")
-    paste("Key:", as.character(factor(df$key, levels = 1:12, labels = numkey)))
+    # Spotify pitch class is 0-11 (0 = C). levels = 1:12 rendered key 0 as
+    # NA and labelled every other key a semitone flat.
+    paste("Key:", as.character(factor(df$key, levels = 0:11, labels = numkey)))
   })
   
   output$timesig = renderText({
